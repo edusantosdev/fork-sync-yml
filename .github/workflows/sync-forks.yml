@@ -1,0 +1,44 @@
+name: Sync all forks
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # daily at 03:17 UTC
+  workflow_dispatch:        # lets you run it manually from the Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync every fork with its upstream
+        env:
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          failed=()
+          forks=$(gh repo list "$OWNER" --fork --limit 1000 --json nameWithOwner -q '.[].nameWithOwner')
+
+          if [ -z "$forks" ]; then
+            echo "No forks found for $OWNER."
+            exit 0
+          fi
+
+          for repo in $forks; do
+            echo "::group::$repo"
+            if gh repo sync "$repo"; then
+              echo "Synced $repo"
+            else
+              echo "::warning::Could not sync $repo (it may have its own commits, or upstream is gone)"
+              failed+=("$repo")
+            fi
+            echo "::endgroup::"
+          done
+
+          {
+            echo "### Fork sync results"
+            echo "Forks checked: $(echo "$forks" | wc -l)"
+            echo "Failed: ${#failed[@]}"
+            for r in "${failed[@]}"; do echo "- $r"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Mark the run as failed if any fork couldn't be synced, so you get notified
+          [ ${#failed[@]} -eq 0 ]
